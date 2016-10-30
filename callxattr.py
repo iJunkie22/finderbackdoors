@@ -18,7 +18,7 @@ class TagColorBits(int):
 
     @property
     def color_name(self):
-        return ('Gray', 'Green', 'Purple', 'Blue', 'Yellow', 'Red', 'Orange')[self - 1]
+        return ('', 'Gray', 'Green', 'Purple', 'Blue', 'Yellow', 'Red', 'Orange')[self]
 
     @property
     def color_int(self):
@@ -26,17 +26,20 @@ class TagColorBits(int):
 
     @classmethod
     def from_color_name(cls, code_str):
-        return cls(('Gray', 'Green', 'Purple', 'Blue', 'Yellow', 'Red', 'Orange').index(code_str) + 1)
+        return cls(('', 'Gray', 'Green', 'Purple', 'Blue', 'Yellow', 'Red', 'Orange').index(code_str))
 
     @classmethod
     def from_finder_xattr(cls, xattr_bin):
-        return cls(cls.tag_struct.unpack(xattr_bin)[0] / 2)
+        return cls((cls.tag_struct.unpack(xattr_bin)[0] % 16) / 2)
 
     def to_finder_xattr_int(self):
         return self * 2
 
     def to_tag_meta_int(self):
-        return unicode(self.color_int)
+        if self == 0:
+            return u''
+        else:
+            return '\n{}'.format(self.color_int)
 
     def __str__(self):
         return self.color_name
@@ -45,10 +48,46 @@ class TagColorBits(int):
         return '<TagColorBits {}:{}>'.format(self.color_int, self.color_name)
 
 
+class HideFileExtensionBit(int):
+    tag_struct = struct.Struct('9xb22x')
+
+    @classmethod
+    def from_finder_xattr(cls, xattr_bin):
+        return cls(cls.tag_struct.unpack(xattr_bin)[0] // 16)
+
+    @classmethod
+    def from_bool(cls, code_bool):
+        return cls(int(code_bool))
+
+    @property
+    def is_hidden(self):
+        return bool(int(self))
+
+
 class FinderXattr(str, object):
+    tag_struct = struct.Struct('9xb22x')
+
     @property
     def tag_color(self):
         return TagColorBits.from_finder_xattr(self)
+
+    @property
+    def file_ext_hidden(self):
+        return HideFileExtensionBit.from_finder_xattr(self)
+
+    @classmethod
+    def make(cls, tagcolorbits, hidefileextbit):
+        merged_bits = (hidefileextbit * 16) + (tagcolorbits * 2)
+        return cls(cls.tag_struct.pack(merged_bits))
+
+    def make_modded(self, tagcolorbits=None, hidefileextbit=None):
+        if tagcolorbits is None:
+            tagcolorbits = self.tag_color
+
+        if hidefileextbit is None:
+            hidefileextbit = self.file_ext_hidden
+
+        return self.make(tagcolorbits, hidefileextbit)
 
 
 class TagsXattr(list, object):
@@ -60,13 +99,13 @@ class TagsXattr(list, object):
         return repr(self.pytags)
 
     def add_tag(self, tagname, tagcolor):
-        self.append(tagname + u'\n' + TagColorBits.from_color_name(tagcolor).to_tag_meta_int())
+        self.append(tagname + TagColorBits.from_color_name(tagcolor).to_tag_meta_int())
 
     def has_tag(self, tagname, tagcolor):
-        return tagname + u'\n' + TagColorBits.from_color_name(tagcolor).to_tag_meta_int() in self
+        return tagname + TagColorBits.from_color_name(tagcolor).to_tag_meta_int() in self
 
     def remove_tag(self, tagname, tagcolor):
-        target = tagname + u'\n' + TagColorBits.from_color_name(tagcolor).to_tag_meta_int()
+        target = tagname + TagColorBits.from_color_name(tagcolor).to_tag_meta_int()
         if target in self:
             self.remove(target)
 
@@ -85,7 +124,10 @@ class SmartXattr(xattr.xattr):
         return cls(os.path.abspath(os.path.expanduser(fp1)))
 
     def get_finder_info(self):
-        result = self.get('com.apple.FinderInfo')
+        try:
+            result = self.get('com.apple.FinderInfo')
+        except IOError:
+            result = self.finder_struct.pack(0)
         finder_obj = FinderXattr(result)
         return finder_obj
 
@@ -112,6 +154,29 @@ class SmartXattr(xattr.xattr):
     def recent_finder_tag(self):
         return TagColorBits.from_finder_xattr(self.get_finder_info())
 
+    @property
+    def hide_file_ext(self):
+        return HideFileExtensionBit.from_finder_xattr(self.get_finder_info())
+
+    def mod_finder_info(self, tagcolorbits=None, hidefileextbit=None):
+        modded_bstr = self.get_finder_info().make_modded(tagcolorbits, hidefileextbit)
+        self.set('com.apple.FinderInfo', modded_bstr)
+
+    @recent_finder_tag.setter
+    def recent_finder_tag(self, value):
+        assert isinstance(value, TagColorBits)
+        self.mod_finder_info(tagcolorbits=value)
+
+    @hide_file_ext.setter
+    def hide_file_ext(self, value):
+        val2 = value
+
+        if isinstance(value, bool):
+            val2 = HideFileExtensionBit.from_bool(value)
+        assert isinstance(val2, HideFileExtensionBit)
+
+        self.mod_finder_info(hidefileextbit=value)
+
 if __name__ == '__main__':
     FP1 = '~/TEMP/tagcolors/purple.txt'
     SCHOOL_TAG = ('School', 'Blue')
@@ -125,5 +190,10 @@ if __name__ == '__main__':
         foo.remove_tag(*SCHOOL_TAG)
     else:
         foo.add_tag(*SCHOOL_TAG)
+
+    if not bool(foo.hide_file_ext):
+        foo.hide_file_ext = True
+    else:
+        foo.hide_file_ext = False
 
     print(foo.get_tags_meta())
