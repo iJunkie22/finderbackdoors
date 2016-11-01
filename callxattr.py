@@ -65,6 +65,9 @@ class HideFileExtensionBit(int):
     def is_hidden(self):
         return bool(int(self))
 
+    def __nonzero__(self):
+        return self.is_hidden
+
 
 class HideFileSelfBit(int):
     YES = 0x40
@@ -73,7 +76,7 @@ class HideFileSelfBit(int):
 
     @classmethod
     def from_finder_xattr(cls, xattr_bin):
-        return cls(cls.tag_struct.unpack(xattr_bin)[1])
+        return cls(cls.tag_struct.unpack(xattr_bin)[0])
 
     @classmethod
     def from_bool(cls, code_bool):
@@ -83,6 +86,9 @@ class HideFileSelfBit(int):
     @property
     def is_hidden(self):
         return self == 0x40
+
+    def __nonzero__(self):
+        return self.is_hidden
 
 
 class FinderXattr(str, object):
@@ -155,7 +161,7 @@ class SmartXattr(xattr.xattr):
         try:
             result = self.get('com.apple.FinderInfo')
         except IOError:
-            result = self.finder_struct.pack(0)
+            result = self.finder_struct.pack(0, 0)
         finder_obj = FinderXattr(result)
         return finder_obj
 
@@ -207,7 +213,7 @@ class SmartXattr(xattr.xattr):
             val2 = HideFileExtensionBit.from_bool(value)
         assert isinstance(val2, HideFileExtensionBit)
 
-        self.mod_finder_info(hidefileextbit=value)
+        self.mod_finder_info(hidefileextbit=val2)
 
     @hide_file_self.setter
     def hide_file_self(self, value):
@@ -217,7 +223,7 @@ class SmartXattr(xattr.xattr):
             val2 = HideFileSelfBit.from_bool(value)
         assert isinstance(val2, HideFileSelfBit)
 
-        self.mod_finder_info(hidefileselfbit=value)
+        self.mod_finder_info(hidefileselfbit=val2)
 
 if __name__ == '__main__':
     FP1 = os.path.expanduser('~/TEMP/tagcolors/purple.txt')
