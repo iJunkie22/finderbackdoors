@@ -3,10 +3,12 @@ import os.path
 import xattr
 import struct
 import biplist
+import os
+import lockedfile
 
 
 class TagColorBits(int):
-    tag_struct = struct.Struct('9xb22x')
+    tag_struct = struct.Struct('8xbb22x')
 
     BLUE = 0x08
     GRAY = 0x02
@@ -30,7 +32,7 @@ class TagColorBits(int):
 
     @classmethod
     def from_finder_xattr(cls, xattr_bin):
-        return cls((cls.tag_struct.unpack(xattr_bin)[0] % 16) / 2)
+        return cls((cls.tag_struct.unpack(xattr_bin)[1] % 16) / 2)
 
     def to_finder_xattr_int(self):
         return self * 2
@@ -49,11 +51,11 @@ class TagColorBits(int):
 
 
 class HideFileExtensionBit(int):
-    tag_struct = struct.Struct('9xb22x')
+    tag_struct = struct.Struct('8xbb22x')
 
     @classmethod
     def from_finder_xattr(cls, xattr_bin):
-        return cls(cls.tag_struct.unpack(xattr_bin)[0] // 16)
+        return cls(cls.tag_struct.unpack(xattr_bin)[1] // 16)
 
     @classmethod
     def from_bool(cls, code_bool):
@@ -64,8 +66,27 @@ class HideFileExtensionBit(int):
         return bool(int(self))
 
 
+class HideFileSelfBit(int):
+    YES = 0x40
+    NO = 0x00
+    tag_struct = struct.Struct('8xbb22x')
+
+    @classmethod
+    def from_finder_xattr(cls, xattr_bin):
+        return cls(cls.tag_struct.unpack(xattr_bin)[1])
+
+    @classmethod
+    def from_bool(cls, code_bool):
+        val = 0x40 if code_bool else 0x00
+        return cls(int(val))
+
+    @property
+    def is_hidden(self):
+        return self == 0x40
+
+
 class FinderXattr(str, object):
-    tag_struct = struct.Struct('9xb22x')
+    tag_struct = struct.Struct('8xbb22x')
 
     @property
     def tag_color(self):
@@ -75,19 +96,26 @@ class FinderXattr(str, object):
     def file_ext_hidden(self):
         return HideFileExtensionBit.from_finder_xattr(self)
 
-    @classmethod
-    def make(cls, tagcolorbits, hidefileextbit):
-        merged_bits = (hidefileextbit * 16) + (tagcolorbits * 2)
-        return cls(cls.tag_struct.pack(merged_bits))
+    @property
+    def file_self_hidden(self):
+        return HideFileSelfBit.from_finder_xattr(self)
 
-    def make_modded(self, tagcolorbits=None, hidefileextbit=None):
+    @classmethod
+    def make(cls, tagcolorbits, hidefileextbit, hidefileselfbit):
+        merged_bits = (hidefileextbit * 16) + (tagcolorbits * 2)
+        return cls(cls.tag_struct.pack(hidefileselfbit, merged_bits))
+
+    def make_modded(self, tagcolorbits=None, hidefileextbit=None, hidefileselfbit=None):
         if tagcolorbits is None:
             tagcolorbits = self.tag_color
 
         if hidefileextbit is None:
             hidefileextbit = self.file_ext_hidden
 
-        return self.make(tagcolorbits, hidefileextbit)
+        if hidefileselfbit is None:
+            hidefileselfbit = self.file_self_hidden
+
+        return self.make(tagcolorbits, hidefileextbit, hidefileselfbit)
 
 
 class TagsXattr(list, object):
@@ -114,7 +142,7 @@ class TagsXattr(list, object):
 
 
 class SmartXattr(xattr.xattr):
-    finder_struct = struct.Struct('9xb22x')
+    finder_struct = struct.Struct('8xbb22x')
 
     def __init__(self, obj):
         super(SmartXattr, self).__init__(obj)
@@ -158,8 +186,12 @@ class SmartXattr(xattr.xattr):
     def hide_file_ext(self):
         return HideFileExtensionBit.from_finder_xattr(self.get_finder_info())
 
-    def mod_finder_info(self, tagcolorbits=None, hidefileextbit=None):
-        modded_bstr = self.get_finder_info().make_modded(tagcolorbits, hidefileextbit)
+    @property
+    def hide_file_self(self):
+        return HideFileSelfBit.from_finder_xattr(self.get_finder_info())
+
+    def mod_finder_info(self, tagcolorbits=None, hidefileextbit=None, hidefileselfbit=None):
+        modded_bstr = self.get_finder_info().make_modded(tagcolorbits, hidefileextbit, hidefileselfbit)
         self.set('com.apple.FinderInfo', modded_bstr)
 
     @recent_finder_tag.setter
@@ -177,8 +209,21 @@ class SmartXattr(xattr.xattr):
 
         self.mod_finder_info(hidefileextbit=value)
 
+    @hide_file_self.setter
+    def hide_file_self(self, value):
+        val2 = value
+
+        if isinstance(value, bool):
+            val2 = HideFileSelfBit.from_bool(value)
+        assert isinstance(val2, HideFileSelfBit)
+
+        self.mod_finder_info(hidefileselfbit=value)
+
 if __name__ == '__main__':
-    FP1 = '~/TEMP/tagcolors/purple.txt'
+    FP1 = os.path.expanduser('~/TEMP/tagcolors/purple.txt')
+    print(os.stat(os.path.expanduser(FP1)).st_flags)
+    print(lockedfile.is_file_locked(FP1))
+
     SCHOOL_TAG = ('School', 'Blue')
 
     foo = SmartXattr.from_path(FP1)
@@ -195,5 +240,10 @@ if __name__ == '__main__':
         foo.hide_file_ext = True
     else:
         foo.hide_file_ext = False
+
+    if not bool(foo.hide_file_self):
+        foo.hide_file_self = True
+    else:
+        foo.hide_file_self = False
 
     print(foo.get_tags_meta())
