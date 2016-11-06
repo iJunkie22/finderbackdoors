@@ -7,6 +7,35 @@ import os
 import lockedfile
 
 
+class DefaultAppBits:
+    XATTR_NAME = 'com.apple.ResourceFork'
+    TOTAL_BYTE_COUNT = 1338
+    HEADER = str('\x00\x00\x01\x00\x00\x00\x05\x08\x00\x00\x04\x08\x00\x00\x00\x32' +
+                 '\x00' * 242 + '\x04\x04')
+
+    FOOTER = struct.pack('>18sH8sHH6sH8s',
+                         str('\x01\x00\x00\x00\x05\x08\x00\x00\x04\x08\x00\x00\x00\x32\x12\x00\x00\x00'),
+                         0xc565,
+                         str('\x00\x00\x00\x1C\x00\x32\x00\x00'),
+                         0x7573, 0x726F, str('\x00\x00\x00\x0A\x00\x00'),
+                         0xFFFF, str('\x00\x00\x00\x00\x03\x00\x00\x00'))
+
+    def __init__(self, app_fp="/foo.app"):
+        self.app_path = app_fp
+
+    def content_bits(self):
+        working_str = str(self.app_path + '\x00')
+
+        working_struct = struct.Struct('>i' + str(len(working_str)) + 's')
+        working_bits = working_struct.pack(len(working_str), working_str)
+        padding_len = self.TOTAL_BYTE_COUNT - (len(self.HEADER) + len(self.FOOTER) + working_struct.size)
+
+        padded_content = working_bits + '\x00' * padding_len
+
+        complete_str = br'{}{}{}'.format(self.HEADER, padded_content, self.FOOTER)
+        return complete_str
+
+
 class TagColorBits(int):
     tag_struct = struct.Struct('8xbb22x')
 
@@ -225,6 +254,11 @@ class SmartXattr(xattr.xattr):
 
         self.mod_finder_info(hidefileselfbit=val2)
 
+    def set_default_app(self, app_fp):
+        dabits = DefaultAppBits(app_fp)
+        self.set(dabits.XATTR_NAME, dabits.content_bits())
+
+
 if __name__ == '__main__':
     FP1 = os.path.expanduser('~/TEMP/tagcolors/purple.txt')
     print(os.stat(os.path.expanduser(FP1)).st_flags)
@@ -251,5 +285,7 @@ if __name__ == '__main__':
         foo.hide_file_self = True
     else:
         foo.hide_file_self = False
+
+    foo.set_default_app("/Applications/Atom.app")
 
     print(foo.get_tags_meta())
