@@ -39,13 +39,13 @@ class DefaultAppBits:
 class TagColorBits(int):
     tag_struct = struct.Struct('8xbb22x')
 
-    BLUE = 0x08
     GRAY = 0x02
     GREEN = 0x04
-    ORANGE = 0x0E
     PURPLE = 0x06
-    RED = 0x0C
+    BLUE = 0x08
     YELLOW = 0x0A
+    RED = 0x0C
+    ORANGE = 0x0E
 
     @property
     def color_name(self):

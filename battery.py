@@ -499,8 +499,11 @@ class BatteryInfo(object):
         self.sample_dict['Voltage'] = value
 
 
+class BatteryInfoHandle(object):
+    pass
+
 foo = BatteryInfo.from_sample()
 print("hey")
 #foo.dump_code()
-print(foo.AvgTimeToEmpty)
+print(foo.AdapterInfo)
 foo.pretty_print()

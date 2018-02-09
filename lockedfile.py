@@ -40,7 +40,7 @@ def bin_check(sample1, target1):
 
 
 def is_file_locked(fp1):
-    return bin_check(os.stat(fp1).st_flags, stat.UF_IMMUTABLE)
+    return os.stat(fp1).st_flags & stat.UF_IMMUTABLE
 
 
 if __name__ == '__main__':
